@@ -1,0 +1,336 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  settings  String   @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                User[]
+  assetCategories      AssetCategory[]
+  assets               Asset[]
+  workerAssignments    WorkerAssetAssignment[]
+  tasks                Task[]
+  taskAssignments      TaskAssignment[]
+  dailyOperations      DailyOperation[]
+  dailyOperationAssignments DailyOperationAssignment[]
+  faultReports         FaultReport[]
+  photos               Photo[]
+  checklistTemplates   ChecklistTemplate[]
+  checklistTemplateAssets ChecklistTemplateAsset[]
+  checklistSubmissions ChecklistSubmission[]
+  hourlyReports        HourlyReport[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  fullName     String
+  username     String
+  passwordHash String
+  role         String   @default("worker")
+  jobTitle     String?
+  phone        String?
+  isActive     Boolean  @default(true)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id])
+  assignedTasks        Task[]                  @relation("TaskAssignee")
+  taskAssignments      TaskAssignment[]
+  createdTasks         Task[]                  @relation("TaskCreator")
+  dailyOperationAssignments DailyOperationAssignment[]
+  createdDailyOperations DailyOperation[]      @relation("DailyOperationCreator")
+  faultReports         FaultReport[]           @relation("FaultReporter")
+  resolvedFaults       FaultReport[]           @relation("FaultResolver")
+  photos               Photo[]
+  workerAssignmentsAsWorker WorkerAssetAssignment[] @relation("AssignmentWorker")
+  workerAssignmentsAsAdmin  WorkerAssetAssignment[] @relation("AssignmentAdmin")
+  checklistSubmissions ChecklistSubmission[]
+  hourlyReports        HourlyReport[]
+
+  @@unique([tenantId, username])
+}
+
+model AssetCategory {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  code         String
+  displayOrder Int      @default(0)
+  config       String   @default("{}")
+  createdAt    DateTime @default(now())
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  assets             Asset[]
+  checklistTemplates ChecklistTemplate[] @relation("TemplateCategoryRelation")
+}
+
+model Asset {
+  id         String   @id @default(uuid())
+  tenantId   String
+  categoryId String
+  parentId   String?
+  name       String
+  code       String
+  metadata   String   @default("{}")
+  status     String   @default("active")
+  isDeleted  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id])
+  category             AssetCategory           @relation(fields: [categoryId], references: [id])
+  parent               Asset?                  @relation("AssetHierarchy", fields: [parentId], references: [id])
+  children             Asset[]                 @relation("AssetHierarchy")
+  workerAssignments    WorkerAssetAssignment[]
+  tasks                Task[]
+  dailyOperations      DailyOperation[]
+  faultReports         FaultReport[]
+  checklistTemplates   ChecklistTemplateAsset[]
+  checklistItems       ChecklistItem[]
+  checklistSubmissions ChecklistSubmission[]
+
+  @@unique([tenantId, code])
+}
+
+model DailyOperation {
+  id              String    @id @default(uuid())
+  tenantId        String
+  assetId         String
+  createdBy       String
+  status          String    @default("pending")
+  description     String?
+  deadlineAt      DateTime
+  startedAt       DateTime?
+  completedAt     DateTime?
+  durationMinutes Int?
+  completionNote  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id])
+  asset       Asset                     @relation(fields: [assetId], references: [id])
+  creator     User                      @relation("DailyOperationCreator", fields: [createdBy], references: [id])
+  assignments DailyOperationAssignment[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, deadlineAt, status])
+}
+
+model DailyOperationAssignment {
+  id               String   @id @default(uuid())
+  tenantId         String
+  dailyOperationId String
+  userId           String
+  createdAt        DateTime @default(now())
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id])
+  dailyOperation DailyOperation @relation(fields: [dailyOperationId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dailyOperationId, userId])
+  @@index([tenantId, userId])
+}
+
+model WorkerAssetAssignment {
+  id           String    @id @default(uuid())
+  tenantId     String
+  workerId     String
+  assetId      String
+  assignedBy   String
+  assignedAt   DateTime  @default(now())
+  unassignedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  worker User   @relation("AssignmentWorker", fields: [workerId], references: [id])
+  asset  Asset  @relation(fields: [assetId], references: [id])
+  admin  User   @relation("AssignmentAdmin", fields: [assignedBy], references: [id])
+}
+
+model Task {
+  id              String    @id @default(uuid())
+  tenantId        String
+  assetId         String
+  assignedTo      String
+  createdBy       String
+  taskType        String
+  source          String    @default("manual")
+  priority        String    @default("normal")
+  status          String    @default("pending")
+  description     String?
+  deadlineAt      DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  durationMinutes Int?
+  completionNote  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  asset    Asset  @relation(fields: [assetId], references: [id])
+  assignee User   @relation("TaskAssignee", fields: [assignedTo], references: [id])
+  creator  User   @relation("TaskCreator", fields: [createdBy], references: [id])
+  taskAssignments TaskAssignment[]
+}
+
+model TaskAssignment {
+  id        String   @id @default(uuid())
+  tenantId  String
+  taskId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([tenantId, userId])
+}
+
+model FaultReport {
+  id              String    @id @default(uuid())
+  tenantId        String
+  assetId         String
+  reportedBy      String
+  partName        String?
+  operationType   String?
+  description     String
+  status          String    @default("open")
+  faultStart      DateTime?
+  faultEnd        DateTime?
+  downtimeMinutes Int?
+  resolvedBy      String?
+  resolutionNote  String?
+  createdAt       DateTime  @default(now())
+
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  asset    Asset   @relation(fields: [assetId], references: [id])
+  reporter User    @relation("FaultReporter", fields: [reportedBy], references: [id])
+  resolver User?   @relation("FaultResolver", fields: [resolvedBy], references: [id])
+  photos   Photo[]
+}
+
+model Photo {
+  id          String   @id @default(uuid())
+  tenantId    String
+  entityType  String
+  entityId    String
+  storagePath String
+  fileSize    Int?
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id])
+  uploader User         @relation(fields: [uploadedBy], references: [id])
+  fault    FaultReport? @relation(fields: [entityId], references: [id])
+}
+
+model ChecklistTemplate {
+  id         String   @id @default(uuid())
+  tenantId   String
+  categoryId String?
+  name       String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  category    AssetCategory? @relation("TemplateCategoryRelation", fields: [categoryId], references: [id])
+  items       ChecklistItem[]
+  submissions ChecklistSubmission[]
+  templateAssets ChecklistTemplateAsset[]
+}
+
+model ChecklistTemplateAsset {
+  id         String   @id @default(uuid())
+  tenantId   String
+  templateId String
+  assetId    String
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  template ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  asset    Asset             @relation(fields: [assetId], references: [id])
+
+  @@unique([templateId, assetId])
+  @@index([tenantId, assetId, isActive])
+}
+
+model ChecklistItem {
+  id                       String  @id @default(uuid())
+  templateId               String
+  assetId                  String
+  label                    String
+  itemType                 String
+  options                  String?
+  unit                     String?
+  severity                 String  @default("normal")
+  isActive                 Boolean @default(true)
+  minThreshold             Float?
+  maxThreshold             Float?
+  photoRequiredOnAbnormal  Boolean @default(false)
+  displayOrder             Int     @default(0)
+
+  asset    Asset             @relation(fields: [assetId], references: [id])
+  template ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  entries  ChecklistEntry[]
+
+  @@index([assetId])
+}
+
+model ChecklistSubmission {
+  id          String   @id @default(uuid())
+  tenantId    String
+  templateId  String
+  assetId     String
+  submittedBy String
+  submittedAt DateTime @default(now())
+  status      String   @default("submitted")
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  template  ChecklistTemplate @relation(fields: [templateId], references: [id])
+  asset     Asset             @relation(fields: [assetId], references: [id])
+  submitter User              @relation(fields: [submittedBy], references: [id])
+  entries   ChecklistEntry[]
+}
+
+model ChecklistEntry {
+  id           String  @id @default(uuid())
+  submissionId String
+  itemId       String
+  value        String
+  isAbnormal   Boolean @default(false)
+  note         String?
+
+  submission ChecklistSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  item       ChecklistItem       @relation(fields: [itemId], references: [id])
+}
+
+model HourlyReport {
+  id              String   @id @default(uuid())
+  tenantId        String
+  workerId        String
+  status          String
+  note            String?
+  promptedAt      DateTime
+  respondedAt     DateTime @default(now())
+  responseTimeSec Int?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  worker User   @relation(fields: [workerId], references: [id])
+}
